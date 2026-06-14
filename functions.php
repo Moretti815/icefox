@@ -1,13 +1,6 @@
 <?php
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
-// 为 /v1/memo 提前开启输出缓冲，避免 Typecho 或 include 文件提前送出头信息
-$___memoPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
-$___memoPath = rtrim($___memoPath, '/');
-if ($___memoPath === '/v1/memo' || strncmp($___memoPath, '/v1/memo/', 9) === 0) {
-    if (!ob_get_level()) ob_start();
-}
-
 /**
  * icefox主题全新3.0版本
  *
@@ -26,13 +19,11 @@ include_once __TYPECHO_ROOT_DIR__ . '/var/Utils/Markdown.php';
  */
 function themeInit($archive)
 {
-
-    // 拦截 /v1/memo API 请求
+    // 拦截 /v1/memo API 请求（兜底，部分环境可能未执行顶部代码）
     $requestUri = $_SERVER['REQUEST_URI'] ?? '';
     $path = parse_url($requestUri, PHP_URL_PATH);
     $path = rtrim($path, '/');
 
-    // 兼容 REQUEST_URI 和 PATH_INFO 两种方式
     if (!($path === '/v1/memo' || strncmp($path, '/v1/memo/', 9) === 0)) {
         $pathInfo = $_SERVER['PATH_INFO'] ?? '';
         $pathInfo = rtrim($pathInfo, '/');
