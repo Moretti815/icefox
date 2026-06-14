@@ -1,6 +1,13 @@
 <?php
 if (!defined('__TYPECHO_ROOT_DIR__')) exit;
 
+// 为 /v1/memo 提前开启输出缓冲，避免 Typecho 或 include 文件提前送出头信息
+$___memoPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+$___memoPath = rtrim($___memoPath, '/');
+if ($___memoPath === '/v1/memo' || strncmp($___memoPath, '/v1/memo/', 9) === 0) {
+    if (!ob_get_level()) ob_start();
+}
+
 /**
  * icefox主题全新3.0版本
  *
@@ -19,6 +26,26 @@ include_once __TYPECHO_ROOT_DIR__ . '/var/Utils/Markdown.php';
  */
 function themeInit($archive)
 {
+
+    // 拦截 /v1/memo API 请求
+    $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+    $path = parse_url($requestUri, PHP_URL_PATH);
+    $path = rtrim($path, '/');
+
+    // 兼容 REQUEST_URI 和 PATH_INFO 两种方式
+    if (!($path === '/v1/memo' || strncmp($path, '/v1/memo/', 9) === 0)) {
+        $pathInfo = $_SERVER['PATH_INFO'] ?? '';
+        $pathInfo = rtrim($pathInfo, '/');
+        if ($pathInfo === '/v1/memo' || strncmp($pathInfo, '/v1/memo/', 9) === 0) {
+            $path = $pathInfo;
+        }
+    }
+
+    if ($path === '/v1/memo' || strncmp($path, '/v1/memo/', 9) === 0) {
+        require_once __DIR__ . '/memo.php';
+        exit;
+    }
+
     // 设置默认模板
     $archive->template = 'index';
 
@@ -1215,6 +1242,305 @@ function generateContentWithSummaryAndMusic($full_content, $summary_length = 100
     }
 
     return $result;
+}
+
+/**
+ * ============================================================
+ *  Memo API - 朋友圈数据接口
+ * ============================================================
+ */
+
+/**
+ * 处理 Memo API 请求
+ */
+function handleMemoApi()
+{
+    $options = Helper::options();
+
+    // Typecho 对未识别路由可能已设置 404，强制覆盖为 200
+    http_response_code(200);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization');
+        header('Access-Control-Max-Age: 86400');
+        exit;
+    }
+
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+
+    try {
+        $db = Typecho_Db::get();
+
+        $page = max(1, intval($_GET['page'] ?? 1));
+        $pageSize = min(50, max(1, intval($_GET['pageSize'] ?? 20)));
+        $offset = ($page - 1) * $pageSize;
+
+        $totalRows = $db->fetchRow($db->select(array('COUNT(cid)' => 'total'))
+            ->from('table.contents')
+            ->where('status = ?', 'publish')
+            ->where('type = ?', 'post'));
+        $total = intval($totalRows['total']);
+
+        $posts = $db->fetchAll($db->select()
+            ->from('table.contents')
+            ->where('status = ?', 'publish')
+            ->where('type = ?', 'post')
+            ->order('created', Typecho_Db::SORT_DESC)
+            ->offset($offset)
+            ->limit($pageSize));
+
+        $result = [];
+        foreach ($posts as $post) {
+            $result[] = buildMemoPostData($post);
+        }
+
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'code' => 0,
+            'message' => 'success',
+            'data' => [
+                'posts' => $result,
+                'total' => $total,
+                'page' => $page,
+                'pageSize' => $pageSize,
+                'hasMore' => ($offset + $pageSize) < $total
+            ]
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    } catch (Exception $e) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'code' => -1,
+            'message' => $e->getMessage()
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+/**
+ * 构建单条朋友圈数据
+ */
+function buildMemoPostData($post)
+{
+    static $db = null, $options = null, $siteUrl = '';
+    if ($db === null) {
+        $db = Typecho_Db::get();
+        $options = Helper::options();
+        $siteUrl = rtrim($options->siteUrl, '/');
+    }
+
+    $cid = intval($post['cid']);
+
+    // --- 内容处理 ---
+    $rawContent = $post['text'] ?? '';
+    $isMarkdown = isset($post['markdown']) && $post['markdown'] == 1;
+
+    if ($isMarkdown) {
+        if (class_exists('Markdown') && method_exists('Markdown', 'convert')) {
+            $content = Markdown::convert($rawContent);
+        } elseif (class_exists('\Typecho\Widget\Helper\Markdown')) {
+            $content = \Typecho\Widget\Helper\Markdown::convert($rawContent);
+        } else {
+            $content = $rawContent;
+        }
+    } else {
+        $content = $rawContent;
+    }
+    $content = parseMusicShortcode($content);
+
+    $summary = strip_tags($content);
+    $summary = preg_replace('/\s+/', ' ', $summary);
+    $summary = trim(mb_substr($summary, 0, 200, 'UTF-8'));
+
+    // --- 提取音乐数据 ---
+    $musicData = [];
+    $musicPattern = '/\[music\s+url=["\']([^"\']+)["\']\s+title=["\']([^"\']+)["\'](?:\s+artist=["\']([^"\']*)["\'])?(?:\s+cover=["\']([^"\']*)["\'])?\]/';
+    preg_match_all($musicPattern, $rawContent, $musicMatches, PREG_SET_ORDER);
+    foreach ($musicMatches as $m) {
+        $musicData[] = [
+            'url' => $m[1],
+            'title' => $m[2],
+            'artist' => $m[3] ?? '',
+            'cover' => $m[4] ?? ''
+        ];
+    }
+
+    // --- 提取图片 ---
+    $images = extractImageSrcs($rawContent);
+
+    // --- 提取视频 ---
+    $video = extractVideoSrc($rawContent);
+
+    // --- 作者信息 ---
+    $author = $db->fetchRow($db->select('uid', 'name', 'mail', 'url', 'screenName')
+        ->from('table.users')
+        ->where('uid = ?', $post['authorId']));
+
+    $authorName = $author ? ($author['screenName'] ?: $author['name']) : 'Unknown';
+    $authorAvatar = $author ? getGravatarUrl($author['mail'], 64) : '';
+    $authorUrl = $author ? Typecho_Common::url('author/' . $author['uid'], $siteUrl) : '';
+
+    // --- 标签 ---
+    $tagRows = $db->fetchAll($db->select('m.name', 'm.slug')
+        ->from('table.relationships AS r')
+        ->join('table.metas AS m', 'r.mid = m.mid', Typecho_Db::INNER_JOIN)
+        ->where('r.cid = ?', $cid)
+        ->where('m.type = ?', 'tag'));
+    $tags = [];
+    foreach ($tagRows as $t) {
+        $tags[] = [
+            'name' => $t['name'],
+            'slug' => $t['slug'],
+            'permalink' => Typecho_Common::url('tag/' . $t['slug'], $siteUrl)
+        ];
+    }
+
+    // --- 分类 ---
+    $catRows = $db->fetchAll($db->select('m.name', 'm.slug')
+        ->from('table.relationships AS r')
+        ->join('table.metas AS m', 'r.mid = m.mid', Typecho_Db::INNER_JOIN)
+        ->where('r.cid = ?', $cid)
+        ->where('m.type = ?', 'category'));
+    $categories = [];
+    foreach ($catRows as $c) {
+        $categories[] = [
+            'name' => $c['name'],
+            'slug' => $c['slug'],
+            'permalink' => Typecho_Common::url('category/' . $c['slug'], $siteUrl)
+        ];
+    }
+
+    // --- 位置 ---
+    $position = getArticleFieldsByCid($cid, 'position');
+    $positionUrl = getArticleFieldsByCid($cid, 'positionUrl');
+    $positionData = null;
+    if (!empty($position) && !empty($position[0]['str_value'])) {
+        $positionData = [
+            'name' => $position[0]['str_value'],
+            'url' => (!empty($positionUrl) && !empty($positionUrl[0]['str_value']))
+                ? $positionUrl[0]['str_value']
+                : null
+        ];
+    }
+
+    // --- 广告标识 ---
+    $isAd = false;
+    $adField = getArticleFieldsByCid($cid, 'isAdvertise');
+    if (!empty($adField)) {
+        $val = isset($adField[0]['int_value']) ? $adField[0]['int_value'] : $adField[0]['str_value'];
+        $isAd = ($val == 1 || $val === '1');
+    }
+
+    // --- 置顶 ---
+    $isTop = getPostIsTop($cid);
+
+    // --- 评论 ---
+    $commentCount = intval($db->fetchObject($db->select(array('COUNT(coid)' => 'total'))
+        ->from('table.comments')
+        ->where('cid = ?', $cid)
+        ->where('status = ?', 'approved'))->total);
+
+    $recentComments = getPostLatestCommentsWithReplies($cid, 3);
+    $commentsData = [];
+    foreach ($recentComments as $comment) {
+        $item = [
+            'coid' => intval($comment['coid']),
+            'author' => $comment['author'],
+            'authorId' => intval($comment['authorId']),
+            'mail' => $comment['mail'],
+            'url' => $comment['url'] ?? '',
+            'text' => $comment['text'],
+            'created' => intval($comment['created']),
+            'level' => 0,
+            'replies' => []
+        ];
+        foreach ($comment['replies'] as $reply) {
+            $item['replies'][] = [
+                'coid' => intval($reply['coid']),
+                'author' => $reply['author'],
+                'authorId' => intval($reply['authorId']),
+                'mail' => $reply['mail'],
+                'url' => $reply['url'] ?? '',
+                'text' => $reply['text'],
+                'created' => intval($reply['created']),
+                'level' => 1,
+                'parentAuthor' => $reply['parentAuthor'] ?? '',
+            ];
+        }
+        $commentsData[] = $item;
+    }
+
+    // --- 点赞 ---
+    $likeRow = $db->fetchRow($db->select('likes')
+        ->from('table.icefox_archive')
+        ->where('cid = ?', $cid));
+    $likesCount = $likeRow ? intval($likeRow['likes']) : 0;
+
+    $likeUsersRows = $db->fetchAll($db->select('author', 'mail', 'created_at')
+        ->from('table.icefox_likes')
+        ->where('cid = ?', $cid)
+        ->order('created_at', Typecho_Db::SORT_DESC));
+    $likeUsers = [];
+    foreach ($likeUsersRows as $like) {
+        if (!empty($like['author'])) {
+            $likeUsers[] = [
+                'author' => $like['author'],
+                'mail' => $like['mail']
+            ];
+        }
+    }
+
+    // --- 浏览量 ---
+    $views = intval($post['views'] ?? 0);
+
+    // --- 永久链接 ---
+    $permalink = '';
+    try {
+        $routeUrl = Typecho_Router::url('post', [
+            'cid' => $cid,
+            'slug' => $post['slug'],
+            'created' => $post['created']
+        ], $siteUrl);
+        if ($routeUrl) {
+            $permalink = $routeUrl;
+        }
+    } catch (Exception $e) {}
+    if (empty($permalink)) {
+        $permalink = Typecho_Common::url('archives/' . $cid, $siteUrl);
+    }
+
+    return [
+        'cid' => $cid,
+        'title' => $post['title'],
+        'slug' => $post['slug'],
+        'content' => $content,
+        'summary' => $summary,
+        'created' => intval($post['created']),
+        'modified' => intval($post['modified']),
+        'permalink' => $permalink,
+        'author' => [
+            'name' => $authorName,
+            'avatar' => $authorAvatar,
+            'url' => $authorUrl
+        ],
+        'tags' => $tags,
+        'categories' => $categories,
+        'images' => $images,
+        'video' => $video,
+        'music' => $musicData,
+        'isAd' => $isAd,
+        'isTop' => $isTop,
+        'position' => $positionData,
+        'views' => $views,
+        'likesCount' => $likesCount,
+        'likes' => $likeUsers,
+        'commentsCount' => $commentCount,
+        'comments' => $commentsData
+    ];
 }
 
 /**

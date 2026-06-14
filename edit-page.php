@@ -28,9 +28,15 @@ function editPageManager() {
         positionUrl: '',
         visibility: 'public',
         isAdvertise: false,
+        isTop: false,
         showLocationPicker: false,
         showVisibilityPicker: false,
         submitStatus: '',
+        tags: [],
+        tagInput: '',
+        externalMediaUrl: '',
+        externalMediaType: 'image',
+        showExternalMediaInput: false,
 
         get visibilityText() {
             const texts = {
@@ -46,30 +52,101 @@ function editPageManager() {
             textarea.style.height = textarea.scrollHeight + 'px';
         },
 
+        // ---- 标签管理 ----
+        addTag() {
+            const tag = this.tagInput.trim().replace(/,$/, '');
+            if (!tag || tag.length > 20) return;
+            if (this.tags.includes(tag)) {
+                this.tagInput = '';
+                return;
+            }
+            if (this.tags.length >= 10) {
+                alert('最多添加10个标签');
+                return;
+            }
+            this.tags.push(tag);
+            this.tagInput = '';
+        },
+
+        removeTag(index) {
+            this.tags.splice(index, 1);
+        },
+
+        handleTagKeydown(event) {
+            if (event.key === 'Enter' || event.key === ',') {
+                event.preventDefault();
+                this.addTag();
+            }
+        },
+
+        // ---- 外链媒体 ----
+        addExternalMedia() {
+            const url = this.externalMediaUrl.trim();
+            if (!url) return;
+
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                alert('请输入以 http:// 或 https:// 开头的链接');
+                return;
+            }
+
+            const isVideo = this.externalMediaType === 'video';
+            const urlType = isVideo ? 'video/mp4' : 'image/jpeg';
+
+            const currentHasVideo = this.mediaFiles.some(m => m.type.startsWith('video/'));
+            const currentHasImage = this.mediaFiles.some(m => m.type.startsWith('image/'));
+
+            if (isVideo) {
+                if (currentHasVideo) {
+                    alert('已上传视频,不能再添加其他文件');
+                    return;
+                }
+                if (currentHasImage) {
+                    alert('已上传图片,不能再上传视频');
+                    return;
+                }
+            } else {
+                if (currentHasVideo) {
+                    alert('已上传视频,不能再添加其他文件');
+                    return;
+                }
+                if (this.mediaFiles.length >= 9) {
+                    alert('最多只能上传9张图片');
+                    return;
+                }
+            }
+
+            this.mediaFiles.push({
+                url: url,
+                type: urlType,
+                preview: url,
+                source: 'url'
+            });
+
+            this.externalMediaUrl = '';
+            this.showExternalMediaInput = false;
+        },
+
+        // ---- 媒体选择 ----
         handleMediaSelect(event) {
             const files = Array.from(event.target.files);
 
-            // 检查是否有视频文件
             const hasVideo = files.some(f => f.type.startsWith('video/'));
             const hasImage = files.some(f => f.type.startsWith('image/'));
             const currentHasVideo = this.mediaFiles.some(f => f.type.startsWith('video/'));
             const currentHasImage = this.mediaFiles.some(f => f.type.startsWith('image/'));
 
-            // 规则1: 如果已有视频,不能再添加任何文件
             if (currentHasVideo) {
                 alert('已上传视频,不能再添加其他文件');
                 event.target.value = '';
                 return;
             }
 
-            // 规则2: 如果已有图片,不能上传视频
             if (currentHasImage && hasVideo) {
                 alert('已上传图片,不能再上传视频');
                 event.target.value = '';
                 return;
             }
 
-            // 规则3: 如果选择了视频,只能上传一个视频,不能有图片
             if (hasVideo) {
                 const videoFiles = files.filter(f => f.type.startsWith('video/'));
                 if (videoFiles.length > 1) {
@@ -82,14 +159,14 @@ function editPageManager() {
                     event.target.value = '';
                     return;
                 }
-                // 只添加这一个视频
                 const videoFile = videoFiles[0];
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     this.mediaFiles.push({
                         file: videoFile,
                         type: videoFile.type,
-                        preview: e.target.result
+                        preview: e.target.result,
+                        source: 'file'
                     });
                 };
                 reader.readAsDataURL(videoFile);
@@ -97,7 +174,6 @@ function editPageManager() {
                 return;
             }
 
-            // 规则4: 上传图片,最多9张
             const remainingSlots = 9 - this.mediaFiles.length;
 
             if (remainingSlots <= 0) {
@@ -118,13 +194,13 @@ function editPageManager() {
                     this.mediaFiles.push({
                         file: file,
                         type: file.type,
-                        preview: e.target.result
+                        preview: e.target.result,
+                        source: 'file'
                     });
                 };
                 reader.readAsDataURL(file);
             });
 
-            // 清空input，允许重复选择同一文件
             event.target.value = '';
         },
 
@@ -141,18 +217,40 @@ function editPageManager() {
             this.submitStatus = '发布中...';
 
             try {
+                // 构建最终内容：将外链媒体以 HTML 标签嵌入
+                let finalContent = this.postContent;
+
+                this.mediaFiles.forEach((media) => {
+                    if (media.source === 'url') {
+                        if (media.type.startsWith('video/')) {
+                            finalContent += `\n\n<video src="${media.url}" controls></video>`;
+                        } else {
+                            finalContent += `\n\n<img src="${media.url}" alt="">`;
+                        }
+                    }
+                });
+
                 const formData = new FormData();
-                formData.append('content', this.postContent);
+                formData.append('content', finalContent);
                 formData.append('position', this.position);
                 formData.append('positionUrl', this.positionUrl);
                 formData.append('visibility', this.visibility);
                 formData.append('isAdvertise', this.isAdvertise ? '1' : '0');
+                formData.append('isTop', this.isTop ? '1' : '0');
+                formData.append('tags', JSON.stringify(this.tags));
 
-                this.mediaFiles.forEach((media, index) => {
-                    formData.append(`media_${index}`, media.file);
+                // 文件上传（非外链）仍以 media_X 发送
+                let fileIndex = 0;
+                this.mediaFiles.forEach((media) => {
+                    if (media.source !== 'url') {
+                        formData.append(`media_${fileIndex}`, media.file);
+                        fileIndex++;
+                    }
                 });
+                formData.append('media_file_count', fileIndex);
 
-                const response = await fetch(`${window.ICEFOX_CONFIG.actionUrl}?do=createPost`, {
+                // 提交到插件文章发布处理器
+                const response = await fetch('<?php echo $this->options->index; ?>/action/icefox?do=createPost', {
                     method: 'POST',
                     body: formData
                 });
@@ -177,6 +275,177 @@ function editPageManager() {
 }
 </script>
 <?php endif; ?>
+
+<style>
+/* ---- 标签 ---- */
+.edit-tags-editor {
+    border-bottom: 1px solid var(--border-color, #e5e5e5);
+    padding: 8px 16px 4px;
+}
+.tags-input-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 6px;
+    cursor: text;
+    transition: border-color .2s;
+    background: var(--input-bg, #fafafa);
+}
+.tags-input-row.focused {
+    border-color: #467b96;
+}
+.tags-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: #fff;
+    background: #467b96;
+    border-radius: 4px;
+    line-height: 1.6;
+}
+.tag-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: rgba(255,255,255,.8);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.tag-chip-remove:hover { color: #fff; }
+.tags-input-wrapper {
+    flex: 1;
+    min-width: 80px;
+}
+.tags-input {
+    width: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 13px;
+    color: inherit;
+    padding: 2px 0;
+    font-family: inherit;
+}
+.tags-input::placeholder { font-size: 12px; }
+.tags-hint {
+    font-size: 11px;
+    color: var(--muted-color, #999);
+    padding: 2px 8px 0;
+}
+
+/* ---- 外链媒体 ---- */
+.edit-external-media-bar {
+    padding: 8px 0;
+}
+.external-media-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: 1px dashed var(--border-color, #ccc);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--muted-color, #888);
+    cursor: pointer;
+    transition: all .2s;
+}
+.external-media-toggle:hover,
+.external-media-toggle.active {
+    border-color: #467b96;
+    color: #467b96;
+}
+.external-media-input-area {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--input-bg, #f5f5f5);
+    border-radius: 6px;
+}
+.external-type-switch {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.external-type-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted-color, #888);
+    background: var(--bg-color, #eee);
+    transition: all .2s;
+    user-select: none;
+}
+.external-type-label.active {
+    color: #fff;
+    background: #467b96;
+}
+.external-input-row {
+    display: flex;
+    gap: 6px;
+}
+.external-url-input {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    outline: none;
+    background: var(--card-bg, #fff);
+    color: inherit;
+    font-family: inherit;
+}
+.external-url-input:focus {
+    border-color: #467b96;
+}
+.external-add-btn {
+    padding: 6px 14px;
+    font-size: 13px;
+    border: none;
+    border-radius: 4px;
+    background: #467b96;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .2s;
+}
+.external-add-btn:hover { background: #3a6579; }
+.external-indicator {
+    position: absolute;
+    top: 4px;
+    right: 24px;
+    background: rgba(0,0,0,.55);
+    color: #fff;
+    border-radius: 3px;
+    padding: 2px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.media-preview-item.is-external img,
+.media-preview-item.is-external video {
+    object-fit: cover;
+}
+</style>
 
 <main>
     <!-- 发布页面顶部栏 -->
@@ -227,15 +496,15 @@ function editPageManager() {
                 </div>
 
                 <!-- 媒体预览区 - 微信朋友圈九宫格样式 -->
-                <div class="edit-media-section" x-show="mediaFiles.length > 0 || true">
+                <div class="edit-media-section">
                     <div class="edit-media-preview" :class="'media-count-' + mediaFiles.length" x-show="mediaFiles.length > 0">
                         <template x-for="(file, index) in mediaFiles" :key="index">
-                            <div class="media-preview-item" :class="{'is-video': file.type.startsWith('video/')}">
+                            <div class="media-preview-item" :class="{'is-video': file.type.startsWith('video/'), 'is-external': file.source === 'url'}">
                                 <template x-if="file.type.startsWith('image/')">
-                                    <img :src="file.preview" alt="预览图片">
+                                    <img :src="file.preview" alt="预览图片" referrerpolicy="no-referrer">
                                 </template>
                                 <template x-if="file.type.startsWith('video/')">
-                                    <video :src="file.preview" muted></video>
+                                    <video :src="file.preview" muted referrerpolicy="no-referrer"></video>
                                 </template>
                                 <button type="button" class="media-remove-btn" @click="removeMedia(index)">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
@@ -247,18 +516,47 @@ function editPageManager() {
                                         <path d="M8 5v14l11-7z"/>
                                     </svg>
                                 </div>
+                                <div class="external-indicator" x-show="file.source === 'url'" title="外链媒体">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                    </svg>
+                                </div>
                             </div>
                         </template>
                         <!-- 添加更多按钮 -->
-                        <div class="media-add-btn" @click="$refs.mediaInput.click()" x-show="mediaFiles.length > 0 && mediaFiles.length < 9">
+                        <div class="media-add-btn" @click="$refs.mediaInput.click()" x-show="mediaFiles.length > 0 && mediaFiles.length < 9 && !mediaFiles.some(m => m.type.startsWith('video/'))">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="28" height="28">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                             </svg>
                         </div>
                     </div>
 
+                    <!-- 添加外链按钮 -->
+                    <div class="edit-external-media-bar" x-show="mediaFiles.length === 0 || (!mediaFiles.some(m => m.type.startsWith('video/')) && mediaFiles.length < 9)">
+                        <button type="button" class="external-media-toggle" @click="showExternalMediaInput = !showExternalMediaInput" :class="{'active': showExternalMediaInput}">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                            <span x-text="showExternalMediaInput ? '收起外链' : '外链添加'"></span>
+                        </button>
+                        <div class="external-media-input-area" x-show="showExternalMediaInput" x-transition>
+                            <div class="external-type-switch">
+                                <label class="external-type-label" :class="{'active': externalMediaType === 'image'}" @click="externalMediaType = 'image'">
+                                    <input type="radio" name="external_type" value="image" x-model="externalMediaType" hidden>图片
+                                </label>
+                                <label class="external-type-label" :class="{'active': externalMediaType === 'video'}" @click="externalMediaType = 'video'">
+                                    <input type="radio" name="external_type" value="video" x-model="externalMediaType" hidden>视频
+                                </label>
+                            </div>
+                            <div class="external-input-row">
+                                <input type="url" class="external-url-input" placeholder="粘贴图片/视频链接" x-model="externalMediaUrl" @keydown.enter.prevent="addExternalMedia()">
+                                <button type="button" class="external-add-btn" @click="addExternalMedia()">添加</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 空状态添加按钮 -->
-                    <div class="media-empty-add" @click="$refs.mediaInput.click()" x-show="mediaFiles.length === 0">
+                    <div class="media-empty-add" @click="$refs.mediaInput.click()" x-show="mediaFiles.length === 0 && !showExternalMediaInput">
                         <div class="media-empty-icon">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor" width="32" height="32">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
@@ -399,6 +697,69 @@ function editPageManager() {
                                 <input type="checkbox" x-model="isAdvertise">
                                 <span class="slider"></span>
                             </label>
+                        </div>
+                    </div>
+
+                    <!-- 是否置顶 -->
+                    <div class="edit-option-item">
+                        <div class="option-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="22" height="22">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 3v1.5M3 21v-6m0 0 2.77-.693a9 9 0 0 1 6.208.682l.108.054a9 9 0 0 0 6.086.71l3.114-.732a48.524 48.524 0 0 1-.005-10.499l-3.11.732a9 9 0 0 1-6.085-.711l-.108-.054a9 9 0 0 0-6.208-.682L3 4.5M3 15V4.5" />
+                            </svg>
+                        </div>
+                        <div class="option-content">
+                            <span class="option-label">置顶</span>
+                        </div>
+                        <div class="option-switch">
+                            <label class="switch">
+                                <input type="checkbox" x-model="isTop">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 标签 -->
+                    <div class="edit-option-item" @click="showLocationPicker = false; showVisibilityPicker = false">
+                        <div class="option-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="22" height="22">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6Z" />
+                            </svg>
+                        </div>
+                        <div class="option-content">
+                            <span class="option-label">标签</span>
+                        </div>
+                        <div class="option-value" x-show="tags.length > 0">
+                            <span x-text="tags.length + '个'"></span>
+                        </div>
+                        <div class="option-arrow">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- 标签编辑区 -->
+                    <div class="edit-tags-editor" x-data="{ tagOpen: false }" x-init="() => { $watch('tags', () => { if (tags.length > 0) tagOpen = true }) }">
+                        <div class="tags-input-row" @click="tagOpen = true" :class="{'focused': tagOpen}">
+                            <div class="tags-chips">
+                                <template x-for="(tag, i) in tags" :key="i">
+                                    <span class="tag-chip">
+                                        <span x-text="tag"></span>
+                                        <button type="button" class="tag-chip-remove" @click.stop="removeTag(i)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </span>
+                                </template>
+                            </div>
+                            <div class="tags-input-wrapper" x-show="tagOpen || tags.length === 0">
+                                <input type="text" class="tags-input" placeholder="输入标签，按回车添加" x-model="tagInput" @keydown="handleTagKeydown($event)" @blur="addTag()" maxlength="20">
+                            </div>
+                        </div>
+                        <div class="tags-hint" x-show="tagOpen">
+                            <span>最多10个标签，回车添加</span>
                         </div>
                     </div>
 
