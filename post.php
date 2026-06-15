@@ -50,6 +50,7 @@ $this->need('header.php');
                     <div class="post-content">
                         <?php echo themeContent($this); ?>
                     </div>
+                    <?php $this->need('components/post/post-link-card.php'); ?>
 
                     <!-- 详情页不需要单独显示视频和图片，因为已经在 content 中显示了 -->
 

@@ -1040,6 +1040,55 @@ function getPostField($archive, $fieldName, $type = 'str')
 }
 
 /**
+ * 获取文章链接卡片字段
+ *
+ * @param object|int $archive 文章对象或 cid
+ * @return array|null
+ */
+function getPostLinkCard($archive)
+{
+    $cid = is_object($archive) ? $archive->cid : intval($archive);
+    if (empty($cid)) {
+        return null;
+    }
+
+    $field = getArticleFieldsByCid($cid, 'linkCard');
+    if (empty($field) || empty($field[0]['str_value'])) {
+        return null;
+    }
+
+    $data = json_decode($field[0]['str_value'], true);
+    if (!is_array($data) || empty($data['title'])) {
+        return null;
+    }
+
+    return [
+        'icon' => isset($data['icon']) ? (string)$data['icon'] : '',
+        'title' => (string)$data['title'],
+        'description' => isset($data['description']) ? (string)$data['description'] : '',
+        'url' => isset($data['url']) ? (string)$data['url'] : '',
+        'link' => '#link-card'
+    ];
+}
+
+/**
+ * 从 URL 获取展示域名
+ */
+function getDisplayDomainFromUrl($url)
+{
+    if (empty($url)) {
+        return '';
+    }
+
+    $host = parse_url($url, PHP_URL_HOST);
+    if (empty($host)) {
+        return $url;
+    }
+
+    return preg_replace('/^www\./i', '', $host);
+}
+
+/**
  * 获取文章的附件列表
  * @param object|int $archive 文章对象或cid
  * @return array 附件列表
@@ -1418,6 +1467,9 @@ function buildMemoPostData($post)
         ];
     }
 
+    // --- 链接卡片 ---
+    $linkCardData = getPostLinkCard($cid);
+
     // --- 广告标识 ---
     $isAd = false;
     $adField = getArticleFieldsByCid($cid, 'isAdvertise');
@@ -1523,6 +1575,7 @@ function buildMemoPostData($post)
         'images' => $images,
         'video' => $video,
         'music' => $musicData,
+        'linkCard' => $linkCardData,
         'isAd' => $isAd,
         'isTop' => $isTop,
         'position' => $positionData,

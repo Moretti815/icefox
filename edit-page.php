@@ -37,6 +37,13 @@ function editPageManager() {
         externalMediaUrl: '',
         externalMediaType: 'image',
         showExternalMediaInput: false,
+        showLinkCardInput: false,
+        linkCard: {
+            icon: '',
+            title: '',
+            description: '',
+            url: ''
+        },
 
         get visibilityText() {
             const texts = {
@@ -46,10 +53,45 @@ function editPageManager() {
             return texts[this.visibility] || '公开';
         },
 
+        get hasLinkCard() {
+            return Object.values(this.linkCard).some(value => value.trim() !== '');
+        },
+
+        get linkCardDescriptionPreview() {
+            return this.linkCard.description.trim() || this.getDomainFromUrl(this.linkCard.url.trim());
+        },
+
+        get linkCardPreviewIcon() {
+            return this.linkCard.icon.trim();
+        },
+
         autoResize(event) {
             const textarea = event.target;
             textarea.style.height = 'auto';
             textarea.style.height = textarea.scrollHeight + 'px';
+        },
+
+        getDomainFromUrl(url) {
+            if (!url) return '';
+            try {
+                return new URL(url).hostname.replace(/^www\./, '');
+            } catch (error) {
+                return url;
+            }
+        },
+
+        isAllowedCardUrl(url) {
+            return !url || url.startsWith('http://') || url.startsWith('https://');
+        },
+
+        clearLinkCard() {
+            this.linkCard = {
+                icon: '',
+                title: '',
+                description: '',
+                url: ''
+            };
+            this.showLinkCardInput = false;
         },
 
         // ---- 标签管理 ----
@@ -209,8 +251,23 @@ function editPageManager() {
         },
 
         async submitPost() {
-            if (!this.postContent.trim() && this.mediaFiles.length === 0) {
+            if (!this.postContent.trim() && this.mediaFiles.length === 0 && !this.hasLinkCard) {
                 alert('请输入内容或选择图片/视频');
+                return;
+            }
+
+            if (this.hasLinkCard && !this.linkCard.title.trim()) {
+                alert('请填写链接卡片标题');
+                return;
+            }
+
+            if (!this.isAllowedCardUrl(this.linkCard.url.trim())) {
+                alert('链接地址请使用 http:// 或 https:// 开头');
+                return;
+            }
+
+            if (!this.isAllowedCardUrl(this.linkCard.icon.trim())) {
+                alert('图标地址请使用 http:// 或 https:// 开头');
                 return;
             }
 
@@ -238,6 +295,15 @@ function editPageManager() {
                 formData.append('isAdvertise', this.isAdvertise ? '1' : '0');
                 formData.append('isTop', this.isTop ? '1' : '0');
                 formData.append('tags', JSON.stringify(this.tags));
+                if (this.hasLinkCard) {
+                    formData.append('linkCard', JSON.stringify({
+                        icon: this.linkCard.icon.trim(),
+                        title: this.linkCard.title.trim(),
+                        description: this.linkCard.description.trim(),
+                        url: this.linkCard.url.trim(),
+                        link: '#link-card'
+                    }));
+                }
 
                 // 文件上传（非外链）仍以 media_X 发送
                 let fileIndex = 0;
@@ -445,6 +511,128 @@ function editPageManager() {
 .media-preview-item.is-external video {
     object-fit: cover;
 }
+
+/* ---- 链接卡片 ---- */
+.edit-link-card-section {
+    padding: 8px 0 12px;
+}
+.link-card-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: 1px dashed var(--border-color, #ccc);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--muted-color, #888);
+    cursor: pointer;
+    transition: all .2s;
+}
+.link-card-toggle:hover,
+.link-card-toggle.active {
+    border-color: #467b96;
+    color: #467b96;
+}
+.link-card-input-area {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--input-bg, #f5f5f5);
+    border-radius: 6px;
+}
+.link-card-input-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.link-card-input {
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    outline: none;
+    background: var(--card-bg, #fff);
+    color: inherit;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.link-card-input:focus {
+    border-color: #467b96;
+}
+.link-card-input.full {
+    grid-column: 1 / -1;
+}
+.link-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+.link-card-clear-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    border: none;
+    border-radius: 4px;
+    background: #d9534f;
+    color: #fff;
+    cursor: pointer;
+}
+.link-card-preview {
+    width: min(480px, 100%);
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    color: var(--text-color, #333);
+    background: var(--primary-background, #f7f7f7);
+    border-radius: 8px;
+    text-decoration: none;
+    box-sizing: border-box;
+}
+.link-card-preview-info {
+    min-width: 0;
+    flex: 1;
+}
+.link-card-preview-title {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.link-card-preview-desc {
+    margin-top: 4px;
+    color: var(--text-sub-color, #777);
+    font-size: 13px;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.link-card-preview-icon,
+.link-card-preview-placeholder {
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+    border-radius: 8px;
+}
+.link-card-preview-icon {
+    object-fit: cover;
+}
+.link-card-preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-sub-color, #888);
+    background: var(--body-background, #eee);
+}
+@media (max-width: 520px) {
+    .link-card-input-grid {
+        grid-template-columns: 1fr;
+    }
+}
 </style>
 
 <main>
@@ -571,6 +759,42 @@ function editPageManager() {
                        multiple
                        @change="handleMediaSelect($event)"
                        style="display: none;">
+
+                <div class="edit-link-card-section">
+                    <button type="button" class="link-card-toggle" @click="showLinkCardInput = !showLinkCardInput" :class="{'active': showLinkCardInput || hasLinkCard}">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="16" height="16">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                        </svg>
+                        <span x-text="showLinkCardInput ? '收起链接卡片' : (hasLinkCard ? '编辑链接卡片' : '链接卡片')"></span>
+                    </button>
+                    <div class="link-card-input-area" x-show="showLinkCardInput" x-transition>
+                        <div class="link-card-input-grid">
+                            <input type="text" class="link-card-input" placeholder="标题" x-model="linkCard.title" maxlength="80">
+                            <input type="url" class="link-card-input" placeholder="图标 URL" x-model="linkCard.icon">
+                            <input type="text" class="link-card-input full" placeholder="描述，不填则显示域名" x-model="linkCard.description" maxlength="160">
+                            <input type="url" class="link-card-input full" placeholder="链接 URL，点击卡片在新标签页打开" x-model="linkCard.url">
+                        </div>
+                        <div class="link-card-actions" x-show="hasLinkCard">
+                            <button type="button" class="link-card-clear-btn" @click="clearLinkCard()">清除卡片</button>
+                        </div>
+                    </div>
+                    <a class="link-card-preview" x-show="hasLinkCard && linkCard.title.trim()" :href="linkCard.url || '#link-card'" target="_blank" rel="noopener noreferrer" @click.prevent>
+                        <div class="link-card-preview-info">
+                            <div class="link-card-preview-title" x-text="linkCard.title"></div>
+                            <div class="link-card-preview-desc" x-text="linkCardDescriptionPreview || '链接卡片'"></div>
+                        </div>
+                        <template x-if="linkCardPreviewIcon">
+                            <img class="link-card-preview-icon" :src="linkCardPreviewIcon" alt="" referrerpolicy="no-referrer">
+                        </template>
+                        <template x-if="!linkCardPreviewIcon">
+                            <div class="link-card-preview-placeholder">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="24" height="24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                </svg>
+                            </div>
+                        </template>
+                    </a>
+                </div>
 
                 <!-- 功能选项区 -->
                 <div class="edit-options">

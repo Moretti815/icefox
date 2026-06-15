@@ -409,6 +409,74 @@ main {
     overflow-wrap: break-word;
 }
 
+.post-link-card {
+    width: min(480px, 95%);
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    color: var(--text-color);
+    background: var(--primary-background);
+    border-radius: 8px;
+    text-decoration: none;
+    box-sizing: border-box;
+    transition: background-color .2s ease;
+}
+
+.post-link-card:hover {
+    color: var(--text-color);
+    background: var(--primary-background-hover);
+    text-decoration: none;
+}
+
+.post-link-card-info {
+    min-width: 0;
+    flex: 1;
+}
+
+.post-link-card-title {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--text-color);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+}
+
+.post-link-card-description {
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--text-sub-color);
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.post-link-card-icon,
+.post-link-card-placeholder {
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+    border-radius: 8px;
+}
+
+.post-link-card-icon {
+    object-fit: cover;
+}
+
+.post-link-card-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-sub-color);
+    background: var(--body-background);
+}
+
 /* 文章位置 */
 .post-position > a,
 .post-position > span {

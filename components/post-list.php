@@ -64,6 +64,7 @@ if (!defined('__TYPECHO_ROOT_DIR__')) exit;
                         }
                         ?>
                     </div>
+                    <?php $this->need('components/post/post-link-card.php'); ?>
                     <?php
                     // 检查是否有视频
                     $videoSrc = extractVideoSrc($this->content);

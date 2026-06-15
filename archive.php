@@ -69,6 +69,7 @@ $this->need('header.php');
                                     }
                                     ?>
                                 </div>
+                                <?php $this->need('components/post/post-link-card.php'); ?>
                                 <?php
                                 // 检查是否有视频
                                 $videoSrc = extractVideoSrc($this->content);
